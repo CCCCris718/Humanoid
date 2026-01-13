@@ -16,14 +16,14 @@ export class DragStateManager {
         this.physicsObject = null;
         this.controls = controls;
 
-        this.arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 15, 0x666666);
+        this.arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 0), 15, 0xff3b3b);
         this.arrow.setLength(15, 3, 1);
         this.scene.add(this.arrow);
         //this.residuals.push(arrow);
         this.arrow.line.material.transparent = true;
         this.arrow.cone.material.transparent = true;
-        this.arrow.line.material.opacity = 0.5;
-        this.arrow.cone.material.opacity = 0.5;
+        this.arrow.line.material.opacity = 0.85;
+        this.arrow.cone.material.opacity = 0.85;
         this.arrow.visible = false;
 
         this.previouslySelected = null;
