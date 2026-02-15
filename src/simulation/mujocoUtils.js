@@ -12,7 +12,7 @@ function stripJsonExtension(path) {
 
 function normalizeMotionEntry(entry) {
   if (typeof entry === 'string') {
-    return { name: stripJsonExtension(entry), file: entry };
+    return { name: stripJsonExtension(entry), file: entry, complianceSuitable: undefined };
   }
   if (entry && typeof entry === 'object') {
     const file = entry.file ?? entry.path ?? null;
@@ -20,7 +20,10 @@ function normalizeMotionEntry(entry) {
       return null;
     }
     const name = entry.name ?? stripJsonExtension(file);
-    return { name, file };
+    const complianceSuitable = typeof entry.compliance_suitable === 'boolean'
+      ? entry.compliance_suitable
+      : undefined;
+    return { name, file, complianceSuitable };
   }
   return null;
 }
@@ -52,6 +55,7 @@ async function loadMotionIndex(indexPayload, motionsUrl) {
     ? new URL(basePath, motionsUrl)
     : new URL('.', motionsUrl);
   const motions = {};
+  const motionMeta = {};
   const entries = index.motions.map((entry) => normalizeMotionEntry(entry));
 
   const requests = entries.map(async (entry) => {
@@ -65,10 +69,13 @@ async function loadMotionIndex(indexPayload, motionsUrl) {
     }
     const clip = await response.json();
     motions[entry.name] = clip;
+    if (typeof entry.complianceSuitable === 'boolean') {
+      motionMeta[entry.name] = { compliance_suitable: entry.complianceSuitable };
+    }
   });
 
   await Promise.all(requests);
-  return motions;
+  return { motions, motionMeta };
 }
 
 export async function reloadScene(mjcf_path) {
@@ -132,7 +139,12 @@ export async function reloadPolicy(policy_path, options = {}) {
       }
       const payload = await response.json();
       const indexedMotions = await loadMotionIndex(payload, motionsUrl);
-      trackingConfig.motions = indexedMotions ?? payload;
+      if (indexedMotions) {
+        trackingConfig.motions = indexedMotions.motions;
+        trackingConfig.motion_meta = indexedMotions.motionMeta;
+      } else {
+        trackingConfig.motions = payload;
+      }
     }
   }
 

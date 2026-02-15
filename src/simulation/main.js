@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { DragStateManager } from './utils/DragStateManager.js';
 import { downloadExampleScenesFolder, getPosition, getQuaternion, toMujocoPos, reloadScene, reloadPolicy } from './mujocoUtils.js';
 
-const defaultPolicy = "./examples/checkpoints/g1/tracking_policy_amass.json";
+const defaultPolicy = "./examples/checkpoints/g1/tracking_policy_latest.json";
 
 export class MuJoCoDemo {
   constructor(mujoco) {
@@ -13,7 +13,9 @@ export class MuJoCoDemo {
 
     this.params = {
       paused: true,
-      current_motion: 'default'
+      current_motion: 'default',
+      compliance_enabled: false,
+      compliance_threshold: 10.0
     };
     this.policyRunner = null;
     this.kpPolicy = null;
@@ -342,12 +344,17 @@ export class MuJoCoDemo {
     const rootPos = new Float32Array([qpos[0], qpos[1], qpos[2]]);
     const rootQuat = new Float32Array([qpos[3], qpos[4], qpos[5], qpos[6]]);
     const rootAngVel = new Float32Array([qvel[3], qvel[4], qvel[5]]);
+    const complianceEnabled = Boolean(this.params?.compliance_enabled);
+    const rawThreshold = Number(this.params?.compliance_threshold);
+    const complianceThreshold = Number.isFinite(rawThreshold) ? rawThreshold : 10.0;
     return {
       jointPos,
       jointVel,
       rootPos,
       rootQuat,
-      rootAngVel
+      rootAngVel,
+      complianceEnabled,
+      complianceThreshold
     };
   }
 

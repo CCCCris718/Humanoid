@@ -82,6 +82,31 @@
           {{ policyLoadError }}
         </v-alert>
 
+        <div class="status-legend follow-controls mt-2">
+          <span class="status-name">Compliance</span>
+          <v-btn
+            size="x-small"
+            variant="tonal"
+            color="primary"
+            :disabled="state !== 1"
+            @click="toggleCompliance"
+          >
+            {{ complianceEnabled ? 'On' : 'Off' }}
+          </v-btn>
+          <span class="status-name">threshold</span>
+          <span class="text-caption">{{ complianceThresholdLabel }}</span>
+        </div>
+        <v-slider
+          v-model="complianceThreshold"
+          min="10"
+          max="20"
+          step="0.1"
+          density="compact"
+          hide-details
+          :disabled="state !== 1 || !complianceEnabled"
+          @update:modelValue="onComplianceThresholdChange"
+        ></v-slider>
+
         <v-divider class="my-2"/>
         <div class="motion-status" v-if="trackingState">
           <div class="status-legend" v-if="trackingState.available">
@@ -271,21 +296,14 @@ export default {
     trackingTimer: null,
     policies: [
       {
-        value: 'g1-tracking-lafan',
-        title: 'G1 Tracking (LaFan1)',
-        description: 'General tracking policy trained on LaFan1 dataset.',
-        policyPath: './examples/checkpoints/g1/tracking_policy_lafan.json',
-        onnxPath: './examples/checkpoints/g1/policy_lafan.onnx'
-      },
-      {
-        value: 'g1-tracking-lafan_amass',
-        title: 'G1 Tracking (LaFan1&AMASS)',
-        description: 'General tracking policy trained on LaFan1 and AMASS datasets.',
-        policyPath: './examples/checkpoints/g1/tracking_policy_amass.json',
-        onnxPath: './examples/checkpoints/g1/policy_amass.onnx'
+        value: 'g1-tracking-latest',
+        title: 'G1 Tracking',
+        description: 'Tracking policy with compliance input enabled.',
+        policyPath: './examples/checkpoints/g1/tracking_policy_latest.json',
+        onnxPath: './examples/checkpoints/g1/policy_latest.onnx'
       }
     ],
-    currentPolicy: 'g1-tracking-lafan_amass',
+    currentPolicy: 'g1-tracking-latest',
     policyLabel: '',
     isPolicyLoading: false,
     policyLoadError: '',
@@ -294,6 +312,8 @@ export default {
     motionUploadType: 'success',
     showUploadOptions: false,
     cameraFollowEnabled: true,
+    complianceEnabled: false,
+    complianceThreshold: 10.0,
     renderScale: 2.0,
     simStepHz: 0,
     isSmallScreen: false,
@@ -352,7 +372,7 @@ export default {
       return names.map((name) => ({
         title: name.split('_')[0],
         value: name,
-        disabled: name === 'default'
+        disabled: this.isMotionDisabled(name)
       }));
     },
     motionGroups() {
@@ -362,11 +382,14 @@ export default {
       }
       const customized = [];
       const amass = [];
+      const gentleHumanoid = [];
       const lafan = [];
 
       for (const item of items) {
         const value = item.value.toLowerCase();
-        if (value.includes('[new]')) {
+        if (/(^|[_\s-])gentle$/.test(value)) {
+          gentleHumanoid.push(item);
+        } else if (value.includes('[new]')) {
           customized.push(item);
         } else if (value.includes('amass')) {
           amass.push(item);
@@ -381,6 +404,9 @@ export default {
       }
       if (amass.length > 0) {
         groups.push({ title: 'AMASS', items: amass });
+      }
+      if (gentleHumanoid.length > 0) {
+        groups.push({ title: 'GentleHumanoid', items: gentleHumanoid });
       }
       if (customized.length > 0) {
         groups.push({ title: 'Customized', items: customized });
@@ -401,6 +427,9 @@ export default {
     },
     renderScaleLabel() {
       return `${this.renderScale.toFixed(2)}x`;
+    },
+    complianceThresholdLabel() {
+      return this.complianceThreshold.toFixed(1);
     },
     simStepLabel() {
       if (!this.simStepHz || !Number.isFinite(this.simStepHz)) {
@@ -444,6 +473,11 @@ export default {
         this.reapplyCustomMotions();
         this.availableMotions = this.getAvailableMotions();
         this.currentMotion = this.demo.params.current_motion ?? this.availableMotions[0] ?? null;
+        this.complianceEnabled = Boolean(this.demo.params?.compliance_enabled);
+        const threshold = Number(this.demo.params?.compliance_threshold);
+        if (Number.isFinite(threshold)) {
+          this.complianceThreshold = threshold;
+        }
         this.startTrackingPoll();
         this.renderScale = this.demo.renderScale ?? this.renderScale;
         const matchingPolicy = this.policies.find(
@@ -559,6 +593,48 @@ export default {
       if (this.demo?.setFollowEnabled) {
         this.demo.setFollowEnabled(this.cameraFollowEnabled);
       }
+    },
+    toggleCompliance() {
+      const nextEnabled = !this.complianceEnabled;
+      if (nextEnabled) {
+        const current = this.currentMotion ?? this.demo?.params?.current_motion;
+        if (current && !this.isMotionComplianceSuitable(current)) {
+          return;
+        }
+      }
+      this.complianceEnabled = nextEnabled;
+      this.applyComplianceSettings();
+    },
+    onComplianceThresholdChange(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) {
+        return;
+      }
+      this.complianceThreshold = numeric;
+      this.applyComplianceSettings();
+    },
+    applyComplianceSettings() {
+      if (!this.demo?.params) {
+        return;
+      }
+      this.demo.params.compliance_enabled = Boolean(this.complianceEnabled);
+      this.demo.params.compliance_threshold = Number(this.complianceThreshold);
+    },
+    isMotionComplianceSuitable(name) {
+      const tracking = this.demo?.policyRunner?.tracking ?? null;
+      if (!tracking || typeof tracking.isComplianceSuitable !== 'function') {
+        return true;
+      }
+      return tracking.isComplianceSuitable(name);
+    },
+    isMotionDisabled(name) {
+      if (name === 'default') {
+        return true;
+      }
+      if (!this.complianceEnabled) {
+        return false;
+      }
+      return !this.isMotionComplianceSuitable(name);
     },
     onMotionChange(value) {
       if (!this.demo) {

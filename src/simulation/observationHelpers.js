@@ -18,6 +18,20 @@ class BootIndicator {
   }
 }
 
+class ComplianceFlagObs {
+  get size() {
+    return 3;
+  }
+
+  compute(state) {
+    const enabled = state?.complianceEnabled ? 1.0 : 0.0;
+    const rawThreshold = Number(state?.complianceThreshold);
+    const threshold = Number.isFinite(rawThreshold) ? rawThreshold : 0.0;
+    const kp = threshold / 0.05;
+    return new Float32Array([enabled, enabled * threshold, enabled * kp]);
+  }
+}
+
 class RootAngVelB {
   get size() {
     return 3;
@@ -166,22 +180,31 @@ class TargetJointPosObs {
 
   get size() {
     const nJoints = this.policy.tracking?.nJoints ?? 0;
-    return this.futureSteps.length * nJoints;
+    return this.futureSteps.length * nJoints * 2;
   }
 
-  compute() {
+  compute(state) {
     const tracking = this.policy.tracking;
     if (!tracking || !tracking.isReady()) {
       return new Float32Array(this.size);
     }
     const indices = clampFutureIndices(tracking.refIdx, this.futureSteps, tracking.refLen);
     const out = new Float32Array(indices.length * tracking.nJoints);
+    const outDiff = new Float32Array(indices.length * tracking.nJoints);
+    const current = state?.jointPos ?? new Float32Array(tracking.nJoints);
     let offset = 0;
     for (const idx of indices) {
-      out.set(tracking.refJointPos[idx], offset);
+      const target = tracking.refJointPos[idx];
+      out.set(target, offset);
+      for (let j = 0; j < tracking.nJoints; j++) {
+        outDiff[offset + j] = target[j] - (current[j] ?? 0.0);
+      }
       offset += tracking.nJoints;
     }
-    return out;
+    const merged = new Float32Array(out.length + outDiff.length);
+    merged.set(out, 0);
+    merged.set(outDiff, out.length);
+    return merged;
   }
 }
 
@@ -271,6 +294,7 @@ class PrevActions {
 export const Observations = {
   PrevActions,
   BootIndicator,
+  ComplianceFlagObs,
   RootAngVelB,
   ProjectedGravityB,
   JointPos,

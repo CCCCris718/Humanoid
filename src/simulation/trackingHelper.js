@@ -43,11 +43,15 @@ export class TrackingHelper {
     this.datasetJointNames = config.dataset_joint_names ?? [];
     this.policyJointNames = config.policy_joint_names ?? [];
     this.motions = {};
-    this.nJoints = this.datasetJointNames.length || this.policyJointNames.length;
+    this.motionMeta = {};
+    this.nJoints = this.policyJointNames.length;
     this.transitionLen = 0;
     this.motionLen = 0;
 
-    this.mapPolicyToDataset = this._buildPolicyToDatasetMap();
+    this.mapDatasetToPolicy = this._buildDatasetToPolicyMap();
+    const configMotionMeta = (config.motion_meta && typeof config.motion_meta === 'object')
+      ? config.motion_meta
+      : {};
 
     for (const [name, clip] of Object.entries(config.motions ?? {})) {
       const normalized = normalizeMotionClip(clip);
@@ -55,7 +59,12 @@ export class TrackingHelper {
         console.warn('TrackingHelper: invalid motion clip', name);
         continue;
       }
+      normalized.jointPos = normalized.jointPos.map((row) => this._mapDatasetJointPosToPolicy(row));
       this.motions[name] = normalized;
+      const meta = configMotionMeta[name];
+      this.motionMeta[name] = {
+        complianceSuitable: typeof meta?.compliance_suitable === 'boolean' ? meta.compliance_suitable : true
+      };
     }
 
     if (!this.motions.default) {
@@ -75,11 +84,22 @@ export class TrackingHelper {
     return Object.keys(this.motions);
   }
 
+  isComplianceSuitable(name) {
+    if (name === 'default') {
+      return true;
+    }
+    return this.motionMeta[name]?.complianceSuitable ?? true;
+  }
+
+
   addMotions(motions, options = {}) {
     const added = [];
     const skipped = [];
     const invalid = [];
     const allowOverwrite = !!options.overwrite;
+    const motionMetaInput = (options.motion_meta && typeof options.motion_meta === 'object')
+      ? options.motion_meta
+      : null;
 
     if (!motions || typeof motions !== 'object') {
       return { added, skipped, invalid };
@@ -99,7 +119,12 @@ export class TrackingHelper {
         invalid.push(name);
         continue;
       }
+      normalized.jointPos = normalized.jointPos.map((row) => this._mapDatasetJointPosToPolicy(row));
       this.motions[name] = normalized;
+      const meta = motionMetaInput?.[name];
+      this.motionMeta[name] = {
+        complianceSuitable: typeof meta?.compliance_suitable === 'boolean' ? meta.compliance_suitable : false
+      };
       added.push(name);
     }
 
@@ -240,9 +265,6 @@ export class TrackingHelper {
 
   _startMotionFromCurrent(name, state) {
     const curr = this._readCurrentState(state);
-    if (state && this.mapPolicyToDataset) {
-      curr.jointPos = this._mapPolicyJointPosToDataset(curr.jointPos);
-    }
     const motion = this.motions[name];
     const aligned = this._alignMotionToCurrent(motion, curr);
     const firstFrame = {
@@ -265,29 +287,27 @@ export class TrackingHelper {
     this.currentDone = this.refLen <= 1;
   }
 
-  _buildPolicyToDatasetMap() {
+  _buildDatasetToPolicyMap() {
     if (!this.datasetJointNames.length || !this.policyJointNames.length) {
-      return null;
+      throw new Error('TrackingHelper requires dataset_joint_names and policy_joint_names');
     }
     const datasetIndex = new Map();
     for (let i = 0; i < this.datasetJointNames.length; i++) {
       datasetIndex.set(this.datasetJointNames[i], i);
     }
     return this.policyJointNames.map((name) => {
-      return datasetIndex.has(name) ? datasetIndex.get(name) : -1;
+      if (!datasetIndex.has(name)) {
+        throw new Error(`TrackingHelper: joint "${name}" missing in dataset_joint_names`);
+      }
+      return datasetIndex.get(name);
     });
   }
 
-  _mapPolicyJointPosToDataset(jointPos) {
-    if (!this.mapPolicyToDataset || !this.datasetJointNames.length) {
-      return Float32Array.from(jointPos);
-    }
-    const out = new Float32Array(this.datasetJointNames.length);
-    for (let i = 0; i < this.mapPolicyToDataset.length; i++) {
-      const datasetIdx = this.mapPolicyToDataset[i];
-      if (datasetIdx >= 0) {
-        out[datasetIdx] = jointPos[i] ?? 0.0;
-      }
+  _mapDatasetJointPosToPolicy(jointPos) {
+    const out = new Float32Array(this.policyJointNames.length);
+    for (let i = 0; i < this.mapDatasetToPolicy.length; i++) {
+      const datasetIdx = this.mapDatasetToPolicy[i];
+      out[i] = jointPos[datasetIdx] ?? 0.0;
     }
     return out;
   }
