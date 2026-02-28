@@ -43,3 +43,7 @@ Thumbs.db
 .cache
 .temp
 dist
+
+# Bridge data (generated/saved motions)
+data/*
+!data/tunnel_config.example.json

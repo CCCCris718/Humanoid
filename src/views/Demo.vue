@@ -51,6 +51,149 @@
             Training Code
           </v-btn>
         <v-divider class="my-2"/>
+
+        <!-- T2M generate -->
+        <div class="d-flex align-center mb-1">
+          <span class="status-name flex-grow-1">Generate</span>
+          <v-icon size="14" :color="bridgeConnected ? 'success' : 'grey'" class="mr-1">mdi-circle</v-icon>
+          <span class="text-caption" :class="bridgeConnected ? 'text-success' : 'text-disabled'">
+            {{ bridgeConnected ? 'online' : 'offline' }}
+          </span>
+        </div>
+        <v-text-field
+          v-model="t2mText"
+          density="compact"
+          hide-details
+          placeholder="e.g. jump jacks"
+          :disabled="t2mGenerating || !bridgeConnected || state !== 1"
+          @keydown.enter.exact.prevent="onGenerate"
+        ></v-text-field>
+        <div class="d-flex align-center gap-1 mt-1">
+          <v-btn
+            color="primary" size="small" variant="flat"
+            :loading="t2mGenerating"
+            :disabled="!t2mText.trim() || !bridgeConnected || state !== 1"
+            @click="onGenerate"
+            class="flex-grow-1"
+          >Generate</v-btn>
+          <span class="text-caption text-medium-emphasis" style="flex-shrink:0">dur</span>
+          <input
+            v-model.number="t2mLength"
+            type="number" min="1" max="20" step="0.5"
+            :disabled="t2mGenerating || state !== 1"
+            style="width:46px; text-align:center; background:#f5f5f5; border:1px solid #ddd; border-radius:4px; font-size:12px; padding:3px 4px; outline:none; color:#555"
+          />
+          <span class="text-caption text-medium-emphasis" style="flex-shrink:0">s</span>
+        </div>
+        <div class="d-flex align-center gap-1 mt-1">
+          <span class="text-caption text-medium-emphasis" style="flex-shrink:0">Remote port</span>
+          <input
+            v-model.number="remotePort"
+            type="number" min="1" max="65535" step="1"
+            :disabled="!bridgeConnected"
+            style="width:64px; text-align:center; background:#f5f5f5; border:1px solid #ddd; border-radius:4px; font-size:12px; padding:3px 4px; outline:none; color:#555"
+          />
+          <v-btn
+            size="small" variant="tonal" color="primary"
+            :disabled="!bridgeConnected || isApplyingConfig"
+            :loading="isApplyingConfig"
+            @click="applyRemotePort"
+          >Apply</v-btn>
+        </div>
+        <div v-if="configMessage" class="text-caption mt-1" :class="configMessageColor">{{ configMessage }}</div>
+        <div class="d-flex align-center mt-1">
+          <v-checkbox
+            v-model="autoReturnDefault"
+            label="Auto return to default"
+            density="compact" hide-details
+          ></v-checkbox>
+        </div>
+        <div v-if="t2mStatus" class="text-caption mt-1" :class="t2mStatusColor">{{ t2mStatus }}</div>
+
+        <!-- Save -->
+        <div v-if="lastSource" class="d-flex align-center gap-1 mt-2">
+          <v-text-field
+            v-model="saveMotionName"
+            density="compact" hide-details
+            placeholder="filename (no .npz)"
+            :disabled="isSaving"
+            class="flex-grow-1"
+          ></v-text-field>
+          <v-btn
+            color="success" size="small" icon variant="flat"
+            :disabled="!saveMotionName.trim() || isSaving"
+            :loading="isSaving"
+            @click="onSave"
+            title="Save to data/saved/"
+          ><v-icon>mdi-content-save</v-icon></v-btn>
+        </div>
+
+        <!-- overwrite confirm -->
+        <v-dialog v-model="showOverwriteDialog" max-width="280">
+          <v-card>
+            <v-card-text class="pt-4">
+              <strong>{{ saveMotionName }}.npz</strong> already exists. Overwrite?
+            </v-card-text>
+            <v-card-actions>
+              <v-spacer/>
+              <v-btn size="small" variant="text" @click="showOverwriteDialog = false">Cancel</v-btn>
+              <v-btn size="small" color="error" variant="flat" @click="onConfirmOverwrite">Overwrite</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- Load -->
+        <div class="d-flex align-center mt-2 mb-1">
+          <span class="status-name flex-grow-1">Load</span>
+          <v-btn icon size="x-small" variant="text" @click="refreshFileList" :disabled="!bridgeConnected">
+            <v-icon size="16">mdi-refresh</v-icon>
+          </v-btn>
+        </div>
+        <div class="d-flex align-center gap-1">
+          <v-select
+            v-model="selectedFile"
+            :items="fileListItems"
+            item-title="name" item-value="name"
+            density="compact" hide-details
+            placeholder="Select file"
+            :disabled="!bridgeConnected || fileList.length === 0 || state !== 1"
+            no-data-text="No files (click refresh)"
+            @update:modelValue="onFileSelect"
+            class="flex-grow-1"
+          >
+            <template #item="{ item, props }">
+              <v-list-item v-bind="props" density="compact">
+                <template #append>
+                  <v-chip size="x-small" :color="folderChipColor(item.raw.folder)" variant="tonal">
+                    {{ folderChipLabel(item.raw.folder) }}
+                  </v-chip>
+                </template>
+              </v-list-item>
+            </template>
+          </v-select>
+          <v-btn color="secondary" size="small" icon variant="flat"
+            :disabled="!selectedFile || !bridgeConnected || state !== 1"
+            @click="onLoadFile" title="Load"
+          ><v-icon>mdi-folder-open</v-icon></v-btn>
+          <v-btn color="error" size="small" icon variant="outlined"
+            :disabled="!bridgeConnected"
+            @click="showClearDialog = true" title="Clear data/generated/"
+          ><v-icon>mdi-delete-sweep</v-icon></v-btn>
+        </div>
+
+        <!-- clear confirm -->
+        <v-dialog v-model="showClearDialog" max-width="280">
+          <v-card>
+            <v-card-text class="pt-4">Delete all <code>gen_*.npz</code> in data/generated/? data/saved/ and data/dataset/ are not affected.</v-card-text>
+            <v-card-actions>
+              <v-spacer/>
+              <v-btn size="small" variant="text" @click="showClearDialog = false">Cancel</v-btn>
+              <v-btn size="small" color="error" variant="flat" @click="onClearGenerated">Clear</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <v-divider class="my-2"/>
         <span class="status-name">Policy</span>
         <div v-if="policyDescription" class="text-caption">{{ policyDescription }}</div>
         <v-select
@@ -320,8 +463,36 @@ export default {
     showSmallScreenAlert: true,
     isSafari: false,
     showSafariAlert: true,
-    resize_listener: null
+    resize_listener: null,
+    bridgeWs: null,
+    bridgeConnected: false,
+    t2mText: '',
+    remotePort: 7000,
+    configMessage: '',
+    configMessageColor: '',
+    isApplyingConfig: false,
+    t2mLength: 4,
+    t2mGenerating: false,
+    t2mStatus: '',
+    t2mStatusColor: 'text-medium-emphasis',
+    fileList: [],
+    selectedFile: null,
+    selectedFileFolder: 'generated',
+    lastSource: null,
+    saveMotionName: '',
+    isSaving: false,
+    showOverwriteDialog: false,
+    showClearDialog: false,
+    autoReturnDefault: true
   }),
+  watch: {
+    // Auto-return to default pose when a non-default motion finishes
+    'trackingState.currentDone'(done) {
+      if (done && this.autoReturnDefault && this.trackingState?.available && !this.trackingState?.isDefault) {
+        this.requestMotion('default');
+      }
+    }
+  },
   computed: {
     shouldShowProgress() {
       const state = this.trackingState;
@@ -425,6 +596,9 @@ export default {
     policyDescription() {
       return this.selectedPolicy?.description ?? '';
     },
+    fileListItems() {
+      return this.fileList.map(f => ({ ...f, title: f.name }));
+    },
     renderScaleLabel() {
       return `${this.renderScale.toFixed(2)}x`;
     },
@@ -439,6 +613,16 @@ export default {
     }
   },
   methods: {
+    folderChipLabel(folder) {
+      if (folder === 'saved') return 'saved';
+      if (folder === 'dataset') return 'dataset';
+      return 'gen';
+    },
+    folderChipColor(folder) {
+      if (folder === 'saved') return 'success';
+      if (folder === 'dataset') return 'info';
+      return 'default';
+    },
     detectSafari() {
       const ua = navigator.userAgent;
       return /Safari\//.test(ua)
@@ -778,6 +962,204 @@ export default {
         this.demo.params.current_motion = name;
       }
       return accepted;
+    },
+    async onSave(overwrite = false) {
+      const name = this.saveMotionName.trim();
+      if (!name || !this.lastSource) return;
+      this.isSaving = true;
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, source: this.lastSource, overwrite }),
+        });
+        if (resp.status === 409) {
+          this.showOverwriteDialog = true;
+        } else if (resp.ok) {
+          this.t2mStatus = `Saved: data/saved/${name}.npz`;
+          this.t2mStatusColor = 'text-success';
+          setTimeout(() => { this.t2mStatus = ''; }, 3000);
+        } else {
+          const err = await resp.text();
+          this.t2mStatus = `Save failed: ${err}`;
+          this.t2mStatusColor = 'text-error';
+        }
+      } catch (e) {
+        this.t2mStatus = `Save failed: ${e.message}`;
+        this.t2mStatusColor = 'text-error';
+      } finally {
+        this.isSaving = false;
+      }
+    },
+    async onConfirmOverwrite() {
+      this.showOverwriteDialog = false;
+      await this.onSave(true);
+    },
+    async onClearGenerated() {
+      this.showClearDialog = false;
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const data = await resp.json();
+        this.t2mStatus = `Deleted ${data.deleted} temp file(s)`;
+        this.t2mStatusColor = 'text-medium-emphasis';
+        this.lastSource = null;
+        this.fileList = this.fileList.filter((f) => f.folder !== 'generated');
+        this.selectedFile = null;
+        setTimeout(() => { this.t2mStatus = ''; }, 3000);
+      } catch (e) {
+        this.t2mStatus = `Clear failed: ${e.message}`;
+        this.t2mStatusColor = 'text-error';
+      }
+    },
+    onFileSelect(name) {
+      const found = this.fileList.find(f => f.name === name);
+      if (found) this.selectedFileFolder = found.folder;
+    },
+    async refreshFileList() {
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/list');
+        this.fileList = await resp.json();
+      } catch { this.fileList = []; }
+    },
+    async onLoadFile() {
+      if (!this.selectedFile) return;
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: this.selectedFile, folder: this.selectedFileFolder }),
+        });
+        if (!resp.ok) {
+          const err = await resp.text();
+          this.t2mStatus = `Load failed: ${err}`;
+          this.t2mStatusColor = 'text-error';
+        }
+      } catch (e) {
+        this.t2mStatus = `Request failed: ${e.message}`;
+        this.t2mStatusColor = 'text-error';
+      }
+    },
+    async fetchConfig() {
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/config');
+        if (resp.ok) {
+          const data = await resp.json();
+          this.remotePort = data.remote_port ?? 7000;
+        }
+      } catch (_) {}
+    },
+    async applyRemotePort() {
+      const port = Number(this.remotePort);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        this.configMessage = 'Port must be 1–65535';
+        this.configMessageColor = 'text-error';
+        setTimeout(() => { this.configMessage = ''; }, 3000);
+        return;
+      }
+      this.isApplyingConfig = true;
+      this.configMessage = '';
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remote_port: port }),
+        });
+        if (resp.ok) {
+          this.configMessage = 'Switched to remote port ' + port + ', tunnel reconnected';
+          this.configMessageColor = 'text-success';
+        } else {
+          const err = await resp.text();
+          this.configMessage = 'Apply failed: ' + err;
+          this.configMessageColor = 'text-error';
+        }
+        setTimeout(() => { this.configMessage = ''; }, 4000);
+      } catch (e) {
+        this.configMessage = 'Request failed: ' + e.message;
+        this.configMessageColor = 'text-error';
+        setTimeout(() => { this.configMessage = ''; }, 4000);
+      } finally {
+        this.isApplyingConfig = false;
+      }
+    },
+    async onGenerate() {
+      const text = this.t2mText.trim();
+      if (!text || this.t2mGenerating || !this.bridgeConnected) return;
+      try {
+        const resp = await fetch('http://127.0.0.1:8766/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, length: this.t2mLength, steps: 10 }),
+        });
+        if (!resp.ok) {
+          const err = await resp.text();
+          this.t2mStatus = err === 'already generating' ? 'Generating, please wait...' : `Error: ${err}`;
+          this.t2mStatusColor = 'text-warning';
+        }
+      } catch (e) {
+        this.t2mStatus = `Request failed: ${e.message}`;
+        this.t2mStatusColor = 'text-error';
+      }
+    },
+    connectBridge() {
+      const url = 'ws://127.0.0.1:8765';
+      let ws;
+      try {
+        ws = new WebSocket(url);
+      } catch {
+        return;
+      }
+      this.bridgeWs = ws;
+      ws.onopen = () => {
+        this.bridgeConnected = true;
+        console.log('[bridge] connected');
+        this.refreshFileList();
+        this.fetchConfig();
+      };
+      ws.onmessage = (evt) => {
+        let msg;
+        try { msg = JSON.parse(evt.data); } catch { return; }
+
+        if (msg.type === 'status') {
+          this.t2mStatus = msg.message ?? '';
+          if (msg.state === 'generating') {
+            this.t2mGenerating = true;
+            this.t2mStatusColor = 'text-medium-emphasis';
+          } else if (msg.state === 'done') {
+            this.t2mGenerating = false;
+            this.t2mStatusColor = 'text-success';
+            setTimeout(() => { this.t2mStatus = ''; }, 3000);
+          } else if (msg.state === 'error') {
+            this.t2mGenerating = false;
+            this.t2mStatusColor = 'text-error';
+          }
+          return;
+        }
+
+        if (msg.type !== 'motion' || !msg.name || !msg.clip) return;
+        const prefix = '[T2M] ';
+        const motionName = msg.name.startsWith(prefix) ? msg.name : `${prefix}${msg.name}`;
+        const result = this.addMotions({ [motionName]: msg.clip }, { overwrite: true });
+        if (result.added.length > 0) {
+          this.availableMotions = this.getAvailableMotions();
+          if (this.demo && this.state === 1) {
+            this.requestMotion(motionName);
+            this.currentMotion = motionName;
+          }
+          if (msg.source) {
+            this.lastSource = msg.source;
+            // pre-fill save name from original text (strip [T2M] prefix)
+            this.saveMotionName = msg.name.replace(/^\[T2M\]\s*/, '').trim();
+          }
+          console.log(`[bridge] loaded motion "${motionName}"`);
+        }
+      };
+      ws.onclose = () => {
+        this.bridgeConnected = false;
+        this.bridgeWs = null;
+        // auto-reconnect every 3s
+        setTimeout(() => this.connectBridge(), 3000);
+      };
+      ws.onerror = () => ws.close();
     }
   },
   mounted() {
@@ -789,6 +1171,7 @@ export default {
     };
     window.addEventListener('resize', this.resize_listener);
     this.init();
+    this.connectBridge();
     this.keydown_listener = (event) => {
       if (event.code === 'Backspace') {
         this.reset();
@@ -801,6 +1184,10 @@ export default {
     document.removeEventListener('keydown', this.keydown_listener);
     if (this.resize_listener) {
       window.removeEventListener('resize', this.resize_listener);
+    }
+    if (this.bridgeWs) {
+      this.bridgeWs.onclose = null;  // prevent auto-reconnect
+      this.bridgeWs.close();
     }
   }
 };
